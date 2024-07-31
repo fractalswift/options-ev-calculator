@@ -4,35 +4,43 @@ from datetime import datetime, timedelta
 from py_vollib.black_scholes import black_scholes as bs
 from py_vollib.black_scholes.implied_volatility import implied_volatility
 
-def calculate_pnl(S, K, expiry_date, r, market_price, price_range, num_samples, days_to_check):
-    # Calculate time to expiration in years
+def generate_days_to_check(days_to_expiry):
+    if days_to_expiry <= 30:  # For short-term options (1 month or less)
+        return [0, 1, 3, 7, 14, 21, days_to_expiry]
+    elif days_to_expiry <= 90:  # For medium-term options (1-3 months)
+        return [0, 7, 14, 30, 60, days_to_expiry]
+    elif days_to_expiry <= 365:  # For options up to 1 year
+        return [0, 30, 90, 180, 270, days_to_expiry]
+    else:  # For long-term options (more than 1 year)
+        checkpoints = [0, 30, 90, 180, 365]
+        while checkpoints[-1] < days_to_expiry - 365:
+            checkpoints.append(checkpoints[-1] + 365)
+        checkpoints.append(days_to_expiry)
+        return checkpoints
+
+def calculate_pnl(S, K, expiry_date, r, market_price, price_range, num_samples):
     today = datetime.now().date()
-    t = (expiry_date - today).days / 365.0
+    days_to_expiry = (expiry_date - today).days
+    t = days_to_expiry / 365.0
     
-    # Calculate implied volatility
     impl_vol = implied_volatility(market_price, S, K, t, r, 'c')
-    
-    # Initial option value
     initial_value = bs('c', S, K, t, r, impl_vol)
     
-    # Generate price samples
     price_samples = np.linspace(price_range[0], price_range[1], num_samples)
+    days_to_check = generate_days_to_check(days_to_expiry)
     
     results = []
     for new_S in price_samples:
         for days in days_to_check:
             future_date = today + timedelta(days=days)
             if future_date > expiry_date:
-                continue  # Skip scenarios past expiry
+                continue
             
             new_t = max(0, (expiry_date - future_date).days / 365.0)
-            
-            # Calculate new option value
             new_value = bs('c', new_S, K, new_t, r, impl_vol)
             
-            # Calculate PnL
             pnl = new_value - initial_value
-            pnl_percentage = (pnl / market_price) * 100  # PnL as a percentage of initial investment
+            pnl_percentage = (pnl / market_price) * 100
             
             results.append({
                 'Date': future_date,
@@ -55,10 +63,9 @@ market_price = 31.85  # Market price of the option
 # Define scenarios
 price_range = [200, 800]  # Range of stock prices to analyze
 num_samples = 5  # Number of price samples to generate
-days_to_check = [0, 30, 60, 90, 180, 365]  # Days from now to check
 
 # Calculate PnL for different scenarios
-pnl_df = calculate_pnl(S, K, expiry_date, r, market_price, price_range, num_samples, days_to_check)
+pnl_df = calculate_pnl(S, K, expiry_date, r, market_price, price_range, num_samples)
 
 # Display results
 pd.set_option('display.float_format', '{:.2f}'.format)
