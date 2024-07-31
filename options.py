@@ -20,6 +20,8 @@ def generate_days_to_check(days_to_expiry):
         return checkpoints[:4]  # Limit to 4 checkpoints
 
 def calculate_probability(S, K, t, r, sigma):
+    if t == 0:
+        return 1 if S >= K else 0
     d1 = (np.log(S / K) + (r + 0.5 * sigma**2) * t) / (sigma * np.sqrt(t))
     return norm.cdf(d1)
 
@@ -45,8 +47,14 @@ def calculate_pnl(S, K, expiry_date, r, market_price, price_range, num_samples):
             new_value = bs('c', new_S, K, new_t, r, impl_vol)
             pnl = new_value - initial_value
             pnl_percentage = (pnl / market_price) * 100
-            prob = calculate_probability(S, new_S, time_to_future, r, impl_vol)
-            ev_percentage = pnl_percentage * prob
+            
+            # Calculate probability of stock being above the current price at the future date
+            prob_above = calculate_probability(S, new_S, time_to_future, r, impl_vol)
+            prob_below = 1 - prob_above
+            
+            # Calculate EV considering both profit scenario and loss scenario
+            ev_percentage = pnl_percentage * prob_above + (-100 * prob_below)
+            
             results.append({
                 'Date': future_date,
                 'Days_To_Expiry': (expiry_date - future_date).days,
@@ -54,13 +62,14 @@ def calculate_pnl(S, K, expiry_date, r, market_price, price_range, num_samples):
                 'Option_Value': new_value,
                 'PnL_$': pnl,
                 'PnL_%': pnl_percentage,
-                'Probability': prob,
+                'Prob_Above': prob_above,
+                'Prob_Below': prob_below,
                 'EV_%': ev_percentage
             })
 
             # Debugging output
             if new_S == 800:
-                print(f"Date: {future_date}, Probability for S={new_S}: {prob}")
+                print(f"Date: {future_date}, Probability for S>={new_S}: {prob_above}")
                 print(f"PnL for S={new_S}: {pnl}")
                 print(f"EV% for S={new_S}: {ev_percentage}")
 
