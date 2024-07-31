@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 from scipy.stats import norm
+from scipy.integrate import quad
 from py_vollib.black_scholes import black_scholes as bs
 from py_vollib.black_scholes.implied_volatility import implied_volatility
 
@@ -48,11 +49,9 @@ def calculate_pnl(S, K, expiry_date, r, market_price, price_range, num_samples):
             pnl = new_value - initial_value
             pnl_percentage = (pnl / market_price) * 100
             
-            # Calculate probability of stock being above the current price at the future date
             prob_above = calculate_probability(S, new_S, time_to_future, r, impl_vol)
             prob_below = 1 - prob_above
             
-            # Calculate EV considering both profit scenario and loss scenario
             ev_percentage = pnl_percentage * prob_above + (-100 * prob_below)
             
             results.append({
@@ -67,16 +66,26 @@ def calculate_pnl(S, K, expiry_date, r, market_price, price_range, num_samples):
                 'EV_%': ev_percentage
             })
 
-            # Debugging output
-            if new_S == 800:
-                print(f"Date: {future_date}, Probability for S>={new_S}: {prob_above}")
-                print(f"PnL for S={new_S}: {pnl}")
-                print(f"EV% for S={new_S}: {ev_percentage}")
-
     print(f"Maximum EV%: {max(result['EV_%'] for result in results)}")
     print(f"Minimum EV%: {min(result['EV_%'] for result in results)}")
 
-    return pd.DataFrame(results)
+    return pd.DataFrame(results), impl_vol, t
+
+def calculate_overall_ev(S, K, t, r, sigma, market_price, price_range):
+    def ev_function(new_S):
+        prob_above = calculate_probability(S, new_S, t, r, sigma)
+        new_value = bs('c', new_S, K, t, r, sigma)
+        pnl = new_value - market_price
+        pnl_percentage = (pnl / market_price) * 100
+        ev_percentage = pnl_percentage * prob_above + (-100 * (1 - prob_above))
+        
+        # We assume a lognormal distribution for stock prices
+        prob_density = norm.pdf(np.log(new_S / S) / (sigma * np.sqrt(t))) / (new_S * sigma * np.sqrt(t))
+        
+        return ev_percentage * prob_density
+
+    overall_ev, _ = quad(ev_function, price_range[0], price_range[1])
+    return overall_ev
 
 # Inputs
 S = 231.06  # Current stock price
@@ -90,7 +99,7 @@ price_range = [200, 800]  # Range of stock prices to analyze
 num_samples = 20  # Number of price samples to generate
 
 # Calculate PnL for different scenarios
-pnl_df = calculate_pnl(S, K, expiry_date, r, market_price, price_range, num_samples)
+pnl_df, impl_vol, t = calculate_pnl(S, K, expiry_date, r, market_price, price_range, num_samples)
 
 # Display results
 pd.set_option('display.float_format', '{:.4f}'.format)
@@ -100,6 +109,8 @@ print(pnl_df.to_string(index=False))
 pnl_df.to_csv('option_pnl_scenarios.csv', index=False)
 print("\nResults saved to 'option_pnl_scenarios.csv'")
 
-# Calculate and display overall Expected Value
-overall_ev_percent = pnl_df['EV_%'].mean()
-print(f"\nOverall Expected Value: {overall_ev_percent:.2f}%")
+
+
+# Calculate and display improved Overall Expected Value
+overall_ev = calculate_overall_ev(S, K, t, r, impl_vol, market_price, price_range)
+print(f"\nImproved Overall Expected Value: {overall_ev:.2f}%")
